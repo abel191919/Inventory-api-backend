@@ -5,6 +5,7 @@ const morgan = require('morgan');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const bcrypt = require('bcrypt');
 
 // Import configuration
 const logger = require('./config/logger');
@@ -161,6 +162,132 @@ const authLimiter = rateLimit({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(compression()); // Compress responses
+
+// ============================================================================
+// EMERGENCY ROUTES (MUST BE BEFORE RATE LIMITER!)
+// ============================================================================
+
+// Only enable emergency routes if explicitly allowed
+if (process.env.ALLOW_EMERGENCY === 'true' || process.env.NODE_ENV !== 'production') {
+  console.log('⚠️  EMERGENCY ROUTES ENABLED ⚠️');
+  
+  // Create admin user
+  app.post('/api/emergency-create-admin', async (req, res) => {
+    try {
+      const { User } = require('./models');
+      
+      // Check if admin exists
+      const existingAdmin = await User.findOne({ where: { username: 'admin' } });
+      
+      if (existingAdmin) {
+        return res.json({
+          success: true,
+          message: 'Admin user already exists',
+          data: {
+            username: 'admin',
+            note: 'Use existing password'
+          }
+        });
+      }
+
+      // Create admin user
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      
+      await User.create({
+        username: 'admin',
+        password: hashedPassword,
+        full_name: 'System Administrator',
+        role: 'admin',
+        email: 'admin@example.com',
+        is_active: true
+      });
+
+      console.log('✅ Admin user created successfully');
+
+      res.json({
+        success: true,
+        message: 'Admin user created successfully',
+        data: {
+          username: 'admin',
+          password: 'admin123',
+          role: 'admin',
+          email: 'admin@example.com'
+        }
+      });
+    } catch (error) {
+      console.error('❌ Create admin error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to create admin user',
+        error: error.message
+      });
+    }
+  });
+
+  // Setup database schema
+  app.get('/api/emergency-setup', async (req, res) => {
+    try {
+      const { sequelize } = require('./utils/database');
+      
+      // Force sync all tables
+      await sequelize.sync({ alter: true });
+      
+      console.log('✅ Database schema setup completed');
+      
+      res.json({
+        success: true,
+        message: 'Database schema setup completed'
+      });
+    } catch (error) {
+      console.error('❌ Setup error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Setup failed',
+        error: error.message
+      });
+    }
+  });
+
+  // Insert sample data
+  app.post('/api/emergency-insert-data', async (req, res) => {
+    try {
+      const { User } = require('./models');
+      
+      // Create admin first if not exists
+      const adminExists = await User.findOne({ where: { username: 'admin' } });
+      if (!adminExists) {
+        const hashedPassword = await bcrypt.hash('admin123', 10);
+        await User.create({
+          username: 'admin',
+          password: hashedPassword,
+          full_name: 'System Administrator',
+          role: 'admin',
+          email: 'admin@example.com',
+          is_active: true
+        });
+      }
+
+      console.log('✅ Sample data inserted successfully');
+
+      res.json({
+        success: true,
+        message: 'Sample data inserted successfully',
+        data: {
+          users: 1
+        }
+      });
+    } catch (error) {
+      console.error('❌ Insert data error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to insert sample data',
+        error: error.message
+      });
+    }
+  });
+
+  console.log('✓ Emergency routes registered at /api/emergency-*');
+}
 
 // ============================================================================
 // LOGGING
